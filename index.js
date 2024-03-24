@@ -5,7 +5,8 @@ import connectDB from './db.js';
 import compModel from './schema.js'; 
 import cloudinary from 'cloudinary'; 
 import multer from 'multer';
-import fs from 'fs';
+import streamifier from 'streamifier';
+import { CloudinaryStorage } from 'multer-storage-cloudinary';
 
 const PORT = 5000;
 env.config();
@@ -20,6 +21,7 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
+
 
 
 
@@ -39,47 +41,45 @@ app.use((req, res, next) => {
 
 
 
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'task',
+    resource_type: 'auto' ,
+    //allowed_formats: ['jpg', 'jpeg', 'png']
+  }
+});
 
 
 
-const upload = multer();
+const uploads = multer();
 
-app.post('/upload', upload.fields([{ name: 'image', maxCount: 1 }]), async (req, res) => {
+app.post('/upload', uploads.single('image'), async (req, res) => {
   try {
+
     const { component, text } = req.body;
     let imageData;
+    console.log({ component, text });
 
-    if (req.files && req.files['image']) {
-      const imageFile = req.files['image'][0];
-      const imagePath = `./temp/${imageFile.originalname}`;
-      fs.writeFileSync(imagePath, imageFile.buffer);
-      
-      const imageResult = await cloudinary.uploader.upload(imagePath, {
-        resource_type: "auto"
-      });
-      imageData = imageResult.secure_url;
+     imageData = await cloudinaryPost(req);
+     console.log({imageData});
 
-      fs.unlinkSync(imagePath);
-    }
-
-  
-    const newData = new compModel({
+     const newData = new compModel({
       component,
       text,
-      image: imageData || null, 
+      image: imageData || null,
       createdAt: new Date(),
       updatedAt: null,
     });
+    newData.save();
+    res.status(200).json({ success: true, data: newData });
 
-    // Save the new data to the database
-    await newData.save();
 
-    res.status(201).json({ success: true, data: newData });
   } catch (error) {
-    console.error('Error uploading data:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    res.status(200).json({ success: false , error });
   }
 });
+
 
 
 app.get('/recentComponents', async (req, res) => {
@@ -127,29 +127,38 @@ app.get('/recentComponents', async (req, res) => {
 });
 
 
+function cloudinaryPost(req) {
+  return new Promise((resolve, reject) => {
+    if (!req.file || !req.file.buffer) {
+      resolve(null);
+      return;
+    }
+
+    const uploadStream = cloudinary.uploader.upload_stream((result, error) => {
+      if (result) {
+        console.timeLog('Result image:', result);
+        resolve(result.secure_url);
+      } else {
+        console.error('Upload failed:', error);
+        reject(error);
+      }
+    }, { folder: "task" });
+
+    uploadStream.end(req.file.buffer);
+  });
+}
 
 
-app.put('/update/:id', upload.fields([{ name: 'image', maxCount: 1 }]), async (req, res) => {
+
+
+
+app.put('/update/:id',uploads.single('image'), async (req, res) => {
   try {
     const { id } = req.params;
     const { component, text } = req.body;
-    let imageData;
 
-    // Check if there is a new image uploaded
-
-    console.log({id});
-    if (req.files && req.files['image']) {
-      const imageFile = req.files['image'][0];
-      const imagePath = `./temp/${imageFile.originalname}`;
-      fs.writeFileSync(imagePath, imageFile.buffer);
-      
-      const imageResult = await cloudinary.uploader.upload(imagePath, {
-        resource_type: "auto"
-      });
-      imageData = imageResult.secure_url;
-
-      fs.unlinkSync(imagePath);
-    }
+    let imageData = await cloudinaryPost(req);
+    console.log({imageData});
 
     // Find the component by ID
     let updatedComponent = await compModel.findById(id);
@@ -161,12 +170,8 @@ app.put('/update/:id', upload.fields([{ name: 'image', maxCount: 1 }]), async (r
     // Update the component data
     updatedComponent.component = component;
     updatedComponent.text = text;
-    if (imageData) {
-      updatedComponent.image = imageData;
-    }
+    updatedComponent.image = imageData;
     updatedComponent.updatedAt = new Date();
-
-    // Save the updated component to the database
     updatedComponent = await updatedComponent.save();
 
     res.status(200).json({ success: true, data: updatedComponent });
