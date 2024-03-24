@@ -6,6 +6,7 @@ import compModel from './schema.js';
 import cloudinary from 'cloudinary'; 
 import multer from 'multer';
 
+//Inital setup
 const PORT = 5000;
 env.config();
 
@@ -14,14 +15,39 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+
+//Used cloudinary cloud plateform for storing images for free
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
+function cloudinaryPost(req) {
+  return new Promise((resolve, reject) => {
+    if (!req.file || !req.file.buffer) {
+      resolve(null);
+      return;
+    }
+
+    const uploadStream = cloudinary.uploader.upload_stream((result, error) => {
+      if (result) {
+        console.timeLog('Result image:', result);
+        resolve(result.secure_url);
+      } else {
+        console.error('Upload failed:', error);
+        reject(error);
+      }
+    }, { folder: "task" });
+
+    uploadStream.end(req.file.buffer);
+  });
+}
+
+
 const uploads = multer();
 
+//upload api 
 app.post('/upload', uploads.single('image'), async (req, res) => {
   try {
 
@@ -49,7 +75,34 @@ app.post('/upload', uploads.single('image'), async (req, res) => {
 });
 
 
+//Update based on recent Id
+app.put('/update/:id',uploads.single('image'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { component, text } = req.body;
 
+    let imageData = await cloudinaryPost(req);
+
+    let updatedComponent = await compModel.findById(id);
+
+    if (!updatedComponent) {
+      return res.status(404).json({ success: false, error: 'Component not found' });
+    }
+    updatedComponent.component = component;
+    updatedComponent.text = text;
+    updatedComponent.image = imageData;
+    updatedComponent.updatedAt = new Date();
+    updatedComponent = await updatedComponent.save();
+
+    res.status(200).json({ success: true, data: updatedComponent });
+  } catch (error) {
+    console.error('Error updating component:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+
+// most recent changes based on component api used aggregate.
 app.get('/recentComponents', async (req, res) => {
   try {
 
@@ -86,58 +139,8 @@ app.get('/recentComponents', async (req, res) => {
 });
 
 
-function cloudinaryPost(req) {
-  return new Promise((resolve, reject) => {
-    if (!req.file || !req.file.buffer) {
-      resolve(null);
-      return;
-    }
 
-    const uploadStream = cloudinary.uploader.upload_stream((result, error) => {
-      if (result) {
-        console.timeLog('Result image:', result);
-        resolve(result.secure_url);
-      } else {
-        console.error('Upload failed:', error);
-        reject(error);
-      }
-    }, { folder: "task" });
-
-    uploadStream.end(req.file.buffer);
-  });
-}
-
-
-
-
-
-app.put('/update/:id',uploads.single('image'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { component, text } = req.body;
-
-    let imageData = await cloudinaryPost(req);
-
-    let updatedComponent = await compModel.findById(id);
-
-    if (!updatedComponent) {
-      return res.status(404).json({ success: false, error: 'Component not found' });
-    }
-    updatedComponent.component = component;
-    updatedComponent.text = text;
-    updatedComponent.image = imageData;
-    updatedComponent.updatedAt = new Date();
-    updatedComponent = await updatedComponent.save();
-
-    res.status(200).json({ success: true, data: updatedComponent });
-  } catch (error) {
-    console.error('Error updating component:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
-  }
-});
-
-
-
+//number of call of API (ADD & Update) happen for a session 
 let addCount = 0; 
 let updateCount = 0; 
 
@@ -156,7 +159,7 @@ app.get('/counts', (req, res) => {
 });
 
 
-
+// creating a server
 app.listen(PORT, () => {
   connectDB();
   console.log(`Server is running on port ${PORT}`);
