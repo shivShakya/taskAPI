@@ -5,8 +5,6 @@ import connectDB from './db.js';
 import compModel from './schema.js'; 
 import cloudinary from 'cloudinary'; 
 import multer from 'multer';
-import streamifier from 'streamifier';
-import { CloudinaryStorage } from 'multer-storage-cloudinary';
 
 const PORT = 5000;
 env.config();
@@ -21,36 +19,6 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
-
-
-
-
-let addCount = 0; // Counter for the 'add' API
-let updateCount = 0; // Counter for the 'update' API
-
-// Middleware to increment the counts for 'add' and 'update' APIs
-app.use((req, res, next) => {
-  if (req.originalUrl === '/upload' && req.method === 'POST') {
-    addCount++;
-  } else if (req.originalUrl.startsWith('/update/') && req.method === 'PUT') {
-    updateCount++;
-  }
-  next();
-});
-
-
-
-
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: 'task',
-    resource_type: 'auto' ,
-    //allowed_formats: ['jpg', 'jpeg', 'png']
-  }
-});
-
-
 
 const uploads = multer();
 
@@ -84,24 +52,19 @@ app.post('/upload', uploads.single('image'), async (req, res) => {
 
 app.get('/recentComponents', async (req, res) => {
   try {
-    // Define the pipeline to aggregate the data
+
     const pipeline = [
-      // Match documents where component is 1, 2, or 3
+
       { $match: { component: { $in: [1, 2] } } },
-      // Sort documents by dateTime in descending order
       { $sort: { createdAt: -1 } },
-      // Group documents by component and push each document into an array
       {
         $group: {
           _id: '$component',
           recentDocuments: { $push: '$$ROOT' }
         }
       },
-      // Sort documents by component in ascending order
       { $sort: { _id: 1 } },
-      // Replace the _id field with the component field
       { $replaceRoot: { newRoot: { $arrayElemAt: ['$recentDocuments', 0] } } },
-      // Project only the required fields including _id and updatedAt
       {
         $project: {
           _id: 1,
@@ -114,11 +77,7 @@ app.get('/recentComponents', async (req, res) => {
         }
       }
     ];
-
-    // Execute the aggregation pipeline
     const recentComponents = await compModel.aggregate(pipeline);
-
-    // Send the retrieved components as a response
     res.status(200).json({ success: true, data: recentComponents });
   } catch (error) {
     console.error('Error retrieving recent components:', error);
@@ -158,16 +117,12 @@ app.put('/update/:id',uploads.single('image'), async (req, res) => {
     const { component, text } = req.body;
 
     let imageData = await cloudinaryPost(req);
-    console.log({imageData});
 
-    // Find the component by ID
     let updatedComponent = await compModel.findById(id);
 
     if (!updatedComponent) {
       return res.status(404).json({ success: false, error: 'Component not found' });
     }
-
-    // Update the component data
     updatedComponent.component = component;
     updatedComponent.text = text;
     updatedComponent.image = imageData;
@@ -183,13 +138,24 @@ app.put('/update/:id',uploads.single('image'), async (req, res) => {
 
 
 
+let addCount = 0; 
+let updateCount = 0; 
+
+app.use((req, res, next) => {
+  if (req.originalUrl === '/upload' && req.method === 'POST') {
+    addCount++;
+  } else if (req.originalUrl.startsWith('/update/') && req.method === 'PUT') {
+    updateCount++;
+  }
+  next();
+});
+
+
 app.get('/counts', (req, res) => {
   res.json({ addCount, updateCount });
 });
 
 
-
-  
 
 app.listen(PORT, () => {
   connectDB();
